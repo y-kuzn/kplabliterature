@@ -16,17 +16,20 @@ interface Props {
   selectedPapers: PaperItem[];
   isAuthenticated: boolean;
   onRequireAuth: () => void;
+  autoStartNonce?: number;
 }
 
 export default function AudioStudioTab({
   selectedPapers,
   isAuthenticated,
   onRequireAuth,
+  autoStartNonce = 0,
 }: Props) {
   const [episodes, setEpisodes] = useState<any[]>([]);
   const [activeEp, setActiveEp] = useState<any | null>(null);
   const [projectName, setProjectName] = useState("Amyloid Chaperones & Cryo-EM");
   const [generating, setGenerating] = useState(false);
+  const [podcastError, setPodcastError] = useState<string>("");
 
   const [seminarInput, setSeminarInput] = useState("");
   const [seminarLoading, setSeminarLoading] = useState(false);
@@ -38,28 +41,44 @@ export default function AudioStudioTab({
       .then((res) => {
         const eps = res.episodes || [];
         setEpisodes(eps);
-        if (eps.length > 0) setActiveEp(eps[0]);
+        if (eps.length > 0 && !activeEp) setActiveEp(eps[0]);
       })
       .catch(() => {});
-  }, []);
+  }, [isAuthenticated]);
 
-  const handleGeneratePodcast = async () => {
-    if (!isAuthenticated) return onRequireAuth();
+  const handleGeneratePodcast = async (overrideTheme?: string) => {
+    if (!isAuthenticated) {
+      setPodcastError("Please sign in to generate an Audio Overview.");
+      onRequireAuth();
+      return;
+    }
     setGenerating(true);
+    setPodcastError("");
     try {
       const ep = await apiFetch("/api/podcasts/generate", {
         method: "POST",
         body: JSON.stringify({
           papers: selectedPapers,
-          project_name: projectName,
+          project_name: (overrideTheme ?? projectName).trim() || "Structural Biology",
         }),
       });
       setEpisodes((prev) => [ep, ...prev]);
       setActiveEp(ep);
+    } catch (err: any) {
+      setPodcastError(err?.message || "Failed to generate podcast. Please try again.");
     } finally {
       setGenerating(false);
     }
   };
+
+  useEffect(() => {
+    if (autoStartNonce > 0 && selectedPapers.length > 0 && !generating) {
+      const leadTitle = selectedPapers[0]?.title?.slice(0, 72) || projectName;
+      setProjectName(leadTitle);
+      void handleGeneratePodcast(leadTitle);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartNonce]);
 
   const handleAnalyzeSeminar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,7 +137,7 @@ export default function AudioStudioTab({
               </p>
             </div>
             <button
-              onClick={handleGeneratePodcast}
+              onClick={() => handleGeneratePodcast()}
               disabled={generating}
               className="px-5 py-2.5 rounded-full text-sm font-medium bg-[#1A73E8] hover:bg-[#1557B0] text-white inline-flex items-center gap-2 disabled:opacity-60"
             >
@@ -127,9 +146,15 @@ export default function AudioStudioTab({
               ) : (
                 <Sparkles className="w-4 h-4" />
               )}
-              {generating ? "Synthesizing Voices (~12s)..." : "Generate Audio Overview"}
+              {generating ? "Synthesizing Voices (~15s)..." : "Generate Audio Overview"}
             </button>
           </div>
+
+          {podcastError && (
+            <div className="p-3.5 rounded-2xl bg-[#FCE8E6] dark:bg-[#5C1D1A] text-[#C5221F] dark:text-[#F6AEA9] text-xs font-medium">
+              {podcastError}
+            </div>
+          )}
 
           {activeEp ? (
             <div className="space-y-4">

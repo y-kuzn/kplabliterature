@@ -179,6 +179,7 @@ function BenchQuestLogo({ large = false }: { large?: boolean }) {
 export default function HomePage() {
   const [nav, setNav] = useState<NavSection>("search");
   const [studioTab, setStudioTab] = useState<"3d" | "audio" | "radar">("3d");
+  const [autoStartPodcastNonce, setAutoStartPodcastNonce] = useState(0);
   const [feedMounted, setFeedMounted] = useState(false);
   const [dark, setDark] = useState(false);
 
@@ -1748,6 +1749,7 @@ export default function HomePage() {
                 selectedPapers={selectedPapersList}
                 isAuthenticated={Boolean(user)}
                 onRequireAuth={() => setAuthModalOpen(true)}
+                autoStartNonce={autoStartPodcastNonce}
               />
             )}
 
@@ -1800,6 +1802,7 @@ export default function HomePage() {
               onClick={() => {
                 setNav("studio");
                 setStudioTab("audio");
+                setAutoStartPodcastNonce((n) => n + 1);
               }}
               className="px-3.5 py-1.5 rounded-full bg-white/15 dark:bg-black/10 hover:bg-white/25 inline-flex items-center gap-1.5 transition"
             >
@@ -1857,6 +1860,7 @@ export default function HomePage() {
           setNotebookOpen(false);
           setNav("studio");
           setStudioTab("audio");
+          setAutoStartPodcastNonce((n) => n + 1);
         }}
         onRequireAuth={() => setAuthModalOpen(true)}
       />
