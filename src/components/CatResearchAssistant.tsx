@@ -27,7 +27,7 @@ interface Props {
 }
 
 const STARTER_QUESTIONS = [
-  "Есть ли данные, что липокалин 2 (LCN2) дисагрегирует или блокирует амилоидные фибриллы?",
+  "Is there any evidence that lipocalin-2 (LCN2) disaggregates or inhibits amyloid fibrils?",
   "Does ApoD inhibit Aβ42 primary or secondary nucleation?",
   "Cryo-EM structures of TGFBIp or corneal dystrophy amyloid fibrils",
 ];
@@ -241,7 +241,7 @@ export default function CatResearchAssistant({
             {messages.length === 0 && (
               <div className="space-y-3 pt-2">
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-[#1E1F20] border border-[#E3E8EF] dark:border-[#333537] text-xs text-[#444746] dark:text-[#C4C7C5] leading-relaxed">
-                  Ask any hypothesis or mechanistic question (in Russian or English). I will search PubMed, OpenAlex & bioRxiv live and answer strictly from retrieved abstracts with citations <span className="font-semibold text-[#1A73E8]">[1][2]</span>.
+                  Ask any hypothesis or mechanistic question. I will search PubMed, OpenAlex & bioRxiv live and answer strictly from retrieved abstracts with citations <span className="font-semibold text-[#1A73E8]">[1][2]</span>.
                 </div>
                 <div className="space-y-2">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-[#5F6368] px-1">
