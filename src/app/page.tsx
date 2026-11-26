@@ -56,6 +56,7 @@ import ScienceCatLoader from "@/components/ScienceCatLoader";
 import PiRadarPanel from "@/components/PiRadarPanel";
 import FeedTab from "@/components/FeedTab";
 import NotebookChatModal from "@/components/NotebookChatModal";
+import CatResearchAssistant from "@/components/CatResearchAssistant";
 import { getAmyloidQuote, TOTAL_AMYLOID_QUOTES } from "@/lib/amyloidQuotes";
 
 type NavSection = "search" | "feed" | "studio" | "zotero";
@@ -1868,6 +1869,14 @@ export default function HomePage() {
         paper={inspectorPaper}
         initialTab={inspectorTab}
         onClose={() => setInspectorPaper(null)}
+        onSaveZotero={(p) => handleSaveToZotero([p])}
+      />
+      <CatResearchAssistant
+        hasSelectionBar={selectedUrls.size > 0}
+        onOpenInspector={(p) => {
+          setInspectorPaper(p);
+          setInspectorTab("overview");
+        }}
         onSaveZotero={(p) => handleSaveToZotero([p])}
       />
       <AuthModal
