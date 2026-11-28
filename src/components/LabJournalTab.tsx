@@ -23,6 +23,23 @@ import { apiFetch, PaperItem } from "@/lib/api";
 
 type ExpType = "tht_96" | "sds_page" | "purification" | "note";
 type WellCategory = "reaction" | "chaperone_ctrl" | "fibril_ctrl" | "blank" | "water";
+const CONC_UNITS = ["mM", "µM", "nM", "mg/mL", "µg/mL", "ng/mL", "%", "×"] as const;
+type ConcUnit = (typeof CONC_UNITS)[number];
+
+const MOLAR_TO_UM: Record<string, number> = { mM: 1000, "µM": 1, uM: 1, nM: 0.001 };
+const MASS_TO_UG_ML: Record<string, number> = { "mg/mL": 1000, "µg/mL": 1, "ug/mL": 1, "ng/mL": 0.001 };
+
+function convertConc(value: number, fromUnit: string, toUnit: string): number | null {
+  if (!value) return 0;
+  if (fromUnit === toUnit) return value;
+  if (fromUnit in MOLAR_TO_UM && toUnit in MOLAR_TO_UM) {
+    return (value * MOLAR_TO_UM[fromUnit]) / MOLAR_TO_UM[toUnit];
+  }
+  if (fromUnit in MASS_TO_UG_ML && toUnit in MASS_TO_UG_ML) {
+    return (value * MASS_TO_UG_ML[fromUnit]) / MASS_TO_UG_ML[toUnit];
+  }
+  return null;
+}
 
 interface ThTCondition {
   id: string;
@@ -30,18 +47,24 @@ interface ThTCondition {
   name: string;
   category: Exclude<WellCategory, "water">;
   mode: "ratio" | "direct";
-  value: number; // ratio denominator (e.g. 10 for 1:10) OR direct chaperone uM
+  value: number; // ratio denominator (e.g. 10 for 1:10) OR direct chaperone concentration
+  chapUnit?: ConcUnit;
   peptideUm: number;
+  peptideUnit?: ConcUnit;
   thtUm: number;
+  thtUnit?: ConcUnit;
   replicates: number;
 }
 
 interface ThTConfig {
   peptideName: string;
   peptideStockUm: number;
+  peptideStockUnit?: ConcUnit;
   chaperoneName: string;
   chaperoneStockUm: number;
+  chaperoneStockUnit?: ConcUnit;
   thtStockUm: number;
+  thtStockUnit?: ConcUnit;
   bufferName: string;
   wellVolumeUl: number;
   overagePct: number;
@@ -328,19 +351,43 @@ export default function LabJournalTab({ selectedPapers }: Props) {
 
   const masterMixRows = useMemo(() => {
     const mult = 1 + (Number(thtCfg.overagePct) || 0) / 100;
+    const pepStockUnit = thtCfg.peptideStockUnit || "µM";
+    const chapStockUnit = thtCfg.chaperoneStockUnit || "µM";
+    const thtStockUnit = thtCfg.thtStockUnit || "µM";
+
     return thtCfg.conditions.map((c) => {
       const reps = Math.max(1, c.replicates || 3);
       const totalUl = +(reps * thtCfg.wellVolumeUl * mult).toFixed(1);
-      const chapUm =
+      const pepUnit = c.peptideUnit || "µM";
+      const chapUnit = c.mode === "ratio" ? pepUnit : c.chapUnit || "µM";
+      const thtUnit = c.thtUnit || "µM";
+
+      const chapVal =
         c.mode === "ratio" && c.value > 0 && c.peptideUm > 0
           ? c.peptideUm / c.value
           : c.value;
+
+      const pepInStockUnit = convertConc(c.peptideUm, pepUnit, pepStockUnit);
+      const chapInStockUnit = convertConc(chapVal, chapUnit, chapStockUnit);
+      const thtInStockUnit = convertConc(c.thtUm, thtUnit, thtStockUnit);
+
+      const unitMismatch =
+        (c.peptideUm > 0 && pepInStockUnit === null) ||
+        (chapVal > 0 && chapInStockUnit === null) ||
+        (c.thtUm > 0 && thtInStockUnit === null);
+
       const pepUl =
-        thtCfg.peptideStockUm > 0 ? +((c.peptideUm / thtCfg.peptideStockUm) * totalUl).toFixed(2) : 0;
+        thtCfg.peptideStockUm > 0 && pepInStockUnit !== null
+          ? +((pepInStockUnit / thtCfg.peptideStockUm) * totalUl).toFixed(2)
+          : 0;
       const chapUl =
-        thtCfg.chaperoneStockUm > 0 ? +((chapUm / thtCfg.chaperoneStockUm) * totalUl).toFixed(2) : 0;
+        thtCfg.chaperoneStockUm > 0 && chapInStockUnit !== null
+          ? +((chapInStockUnit / thtCfg.chaperoneStockUm) * totalUl).toFixed(2)
+          : 0;
       const thtUl =
-        thtCfg.thtStockUm > 0 ? +((c.thtUm / thtCfg.thtStockUm) * totalUl).toFixed(2) : 0;
+        thtCfg.thtStockUm > 0 && thtInStockUnit !== null
+          ? +((thtInStockUnit / thtCfg.thtStockUm) * totalUl).toFixed(2)
+          : 0;
       const bufUl = +(totalUl - pepUl - chapUl - thtUl).toFixed(2);
       const wells = Object.values(plateMap)
         .filter((w) => w.mixId === c.mixId && w.read)
@@ -351,12 +398,14 @@ export default function LabJournalTab({ selectedPapers }: Props) {
         cond: c,
         wellsRange: wells.length ? `${wells[0]}–${wells[wells.length - 1]}` : "—",
         totalUl,
-        chapUm: +chapUm.toFixed(2),
+        chapUm: +chapVal.toFixed(3),
+        chapUnit,
         bufUl,
         thtUl,
         chapUl,
         pepUl,
         lowVol,
+        unitMismatch,
       };
     });
   }, [thtCfg, plateMap]);
@@ -370,6 +419,7 @@ export default function LabJournalTab({ selectedPapers }: Props) {
     if (!hasFibrilCtrl) warnings.push("Missing Peptide-only Fibril control.");
     if (!hasChapCtrl) warnings.push(`Missing ${thtCfg.chaperoneName}-only control (checks self-ThT fluorescence).`);
     if (thtCfg.edgeBarrier === "none") warnings.push("Edge barrier is off — add 200 uL Milli-Q water to corners (A1, A12, H1, H12) for 37 °C runs.");
+    if (masterMixRows.some((m) => m.unitMismatch)) warnings.push("Unit mismatch between a stock and a condition (e.g., mg/mL vs µM) — match mass/molar units so volumes calculate.");
     if (masterMixRows.some((m) => m.lowVol)) warnings.push("One or more pipetting volumes are < 1.0 uL — prepare a 1:10 working stock for accuracy.");
     if (masterMixRows.some((m) => m.bufUl < 0)) warnings.push("Total stock volumes exceed reaction volume! Increase stock concentrations.");
     return warnings;
@@ -711,13 +761,22 @@ export default function LabJournalTab({ selectedPapers }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">Peptide Stock (µM)</label>
-                  <input
-                    type="number"
-                    value={thtCfg.peptideStockUm}
-                    onChange={(e) => setActive({ ...active, payload: { ...thtCfg, peptideStockUm: Number(e.target.value) } })}
-                    className="w-full px-3 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
-                  />
+                  <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">Peptide Stock</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="number"
+                      value={thtCfg.peptideStockUm}
+                      onChange={(e) => setActive({ ...active, payload: { ...thtCfg, peptideStockUm: Number(e.target.value) } })}
+                      className="w-full min-w-0 px-2.5 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                    />
+                    <select
+                      value={thtCfg.peptideStockUnit || "µM"}
+                      onChange={(e) => setActive({ ...active, payload: { ...thtCfg, peptideStockUnit: e.target.value as ConcUnit } })}
+                      className="px-1.5 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                    >
+                      {CONC_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">Chaperone / Additive</label>
@@ -728,22 +787,40 @@ export default function LabJournalTab({ selectedPapers }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">Chaperone Stock (µM)</label>
-                  <input
-                    type="number"
-                    value={thtCfg.chaperoneStockUm}
-                    onChange={(e) => setActive({ ...active, payload: { ...thtCfg, chaperoneStockUm: Number(e.target.value) } })}
-                    className="w-full px-3 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
-                  />
+                  <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">Chaperone Stock</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="number"
+                      value={thtCfg.chaperoneStockUm}
+                      onChange={(e) => setActive({ ...active, payload: { ...thtCfg, chaperoneStockUm: Number(e.target.value) } })}
+                      className="w-full min-w-0 px-2.5 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                    />
+                    <select
+                      value={thtCfg.chaperoneStockUnit || "µM"}
+                      onChange={(e) => setActive({ ...active, payload: { ...thtCfg, chaperoneStockUnit: e.target.value as ConcUnit } })}
+                      className="px-1.5 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                    >
+                      {CONC_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">ThT Stock (µM)</label>
-                  <input
-                    type="number"
-                    value={thtCfg.thtStockUm}
-                    onChange={(e) => setActive({ ...active, payload: { ...thtCfg, thtStockUm: Number(e.target.value) } })}
-                    className="w-full px-3 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
-                  />
+                  <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">ThT Stock</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="number"
+                      value={thtCfg.thtStockUm}
+                      onChange={(e) => setActive({ ...active, payload: { ...thtCfg, thtStockUm: Number(e.target.value) } })}
+                      className="w-full min-w-0 px-2.5 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                    />
+                    <select
+                      value={thtCfg.thtStockUnit || "µM"}
+                      onChange={(e) => setActive({ ...active, payload: { ...thtCfg, thtStockUnit: e.target.value as ConcUnit } })}
+                      className="px-1.5 py-1.5 rounded-xl bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                    >
+                      {CONC_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-[10px] font-semibold uppercase text-[#5F6368] mb-1">Buffer</label>
@@ -829,9 +906,9 @@ export default function LabJournalTab({ selectedPapers }: Props) {
                         <th className="py-1.5 pr-2">Label</th>
                         <th className="py-1.5 pr-2">Type</th>
                         <th className="py-1.5 pr-2">Mode</th>
-                        <th className="py-1.5 pr-2">1:X / µM</th>
-                        <th className="py-1.5 pr-2">Peptide (µM)</th>
-                        <th className="py-1.5 pr-2">ThT (µM)</th>
+                        <th className="py-1.5 pr-2">1:X / Chaperone</th>
+                        <th className="py-1.5 pr-2">Peptide Final</th>
+                        <th className="py-1.5 pr-2">ThT Final</th>
                         <th className="py-1.5 pr-2">Reps</th>
                         <th className="py-1.5"></th>
                       </tr>
@@ -888,44 +965,85 @@ export default function LabJournalTab({ selectedPapers }: Props) {
                               className="px-2 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
                             >
                               <option value="ratio">Ratio (1:X)</option>
-                              <option value="direct">Direct µM</option>
+                              <option value="direct">Direct Conc</option>
                             </select>
                           </td>
-                          <td className="py-1.5 pr-2 w-20">
-                            <input
-                              type="number"
-                              value={cond.value}
-                              onChange={(e) => {
-                                const arr = [...thtCfg.conditions];
-                                arr[idx] = { ...cond, value: Number(e.target.value) };
-                                setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
-                              }}
-                              className="w-16 px-2 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
-                            />
+                          <td className="py-1.5 pr-2">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                value={cond.value}
+                                onChange={(e) => {
+                                  const arr = [...thtCfg.conditions];
+                                  arr[idx] = { ...cond, value: Number(e.target.value) };
+                                  setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
+                                }}
+                                className="w-16 px-2 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                              />
+                              {cond.mode === "direct" && (
+                                <select
+                                  value={cond.chapUnit || "µM"}
+                                  onChange={(e) => {
+                                    const arr = [...thtCfg.conditions];
+                                    arr[idx] = { ...cond, chapUnit: e.target.value as ConcUnit };
+                                    setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
+                                  }}
+                                  className="px-1 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                                >
+                                  {CONC_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                              )}
+                            </div>
                           </td>
-                          <td className="py-1.5 pr-2 w-20">
-                            <input
-                              type="number"
-                              value={cond.peptideUm}
-                              onChange={(e) => {
-                                const arr = [...thtCfg.conditions];
-                                arr[idx] = { ...cond, peptideUm: Number(e.target.value) };
-                                setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
-                              }}
-                              className="w-16 px-2 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
-                            />
+                          <td className="py-1.5 pr-2">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                value={cond.peptideUm}
+                                onChange={(e) => {
+                                  const arr = [...thtCfg.conditions];
+                                  arr[idx] = { ...cond, peptideUm: Number(e.target.value) };
+                                  setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
+                                }}
+                                className="w-16 px-2 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                              />
+                              <select
+                                value={cond.peptideUnit || "µM"}
+                                onChange={(e) => {
+                                  const arr = [...thtCfg.conditions];
+                                  arr[idx] = { ...cond, peptideUnit: e.target.value as ConcUnit };
+                                  setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
+                                }}
+                                className="px-1 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                              >
+                                {CONC_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                              </select>
+                            </div>
                           </td>
-                          <td className="py-1.5 pr-2 w-20">
-                            <input
-                              type="number"
-                              value={cond.thtUm}
-                              onChange={(e) => {
-                                const arr = [...thtCfg.conditions];
-                                arr[idx] = { ...cond, thtUm: Number(e.target.value) };
-                                setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
-                              }}
-                              className="w-16 px-2 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
-                            />
+                          <td className="py-1.5 pr-2">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                value={cond.thtUm}
+                                onChange={(e) => {
+                                  const arr = [...thtCfg.conditions];
+                                  arr[idx] = { ...cond, thtUm: Number(e.target.value) };
+                                  setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
+                                }}
+                                className="w-16 px-2 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                              />
+                              <select
+                                value={cond.thtUnit || "µM"}
+                                onChange={(e) => {
+                                  const arr = [...thtCfg.conditions];
+                                  arr[idx] = { ...cond, thtUnit: e.target.value as ConcUnit };
+                                  setActive({ ...active, payload: { ...thtCfg, conditions: arr } });
+                                }}
+                                className="px-1 py-1 rounded-lg bg-[#F8FAFD] dark:bg-[#282A2C] border border-[#DADCE0] dark:border-[#444746]"
+                              >
+                                {CONC_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                              </select>
+                            </div>
                           </td>
                           <td className="py-1.5 pr-2 w-16">
                             <input
@@ -1063,7 +1181,7 @@ export default function LabJournalTab({ selectedPapers }: Props) {
                         <td className="py-2 pr-2">{m.thtUl}</td>
                         <td className="py-2 pr-2">
                           {m.chapUl}{" "}
-                          <span className="text-[10px] text-[#5F6368]">({m.chapUm} µM)</span>
+                          <span className="text-[10px] text-[#5F6368]">({m.chapUm} {m.chapUnit})</span>
                         </td>
                         <td className="py-2 pr-2 font-semibold">{m.pepUl}</td>
                       </tr>
