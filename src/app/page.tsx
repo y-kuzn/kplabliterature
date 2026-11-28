@@ -57,9 +57,10 @@ import PiRadarPanel from "@/components/PiRadarPanel";
 import FeedTab from "@/components/FeedTab";
 import NotebookChatModal from "@/components/NotebookChatModal";
 import CatResearchAssistant from "@/components/CatResearchAssistant";
+import LabJournalTab from "@/components/LabJournalTab";
 import { getAmyloidQuote, TOTAL_AMYLOID_QUOTES } from "@/lib/amyloidQuotes";
 
-type NavSection = "search" | "feed" | "studio" | "zotero";
+type NavSection = "search" | "feed" | "studio" | "zotero" | "journal";
 type SearchInputMode = "omni" | "boolean" | "batch" | "lookup";
 
 const DOMAIN_CHIPS = [
@@ -675,6 +676,17 @@ export default function HomePage() {
                     "Personal Settings, Zotero & Telegram Sync",
                     "Configure personal vs. lab AI scoring interests, tracked PIs, Zotero libraries (6072114 / 6064631 / 6059722), smart tags, and @BenchQuestScoutBot pairing.",
                   ],
+                  ...(user?.username?.toLowerCase() === "y-kuz"
+                    ? ([
+                        [
+                          "journal",
+                          "Lab Journal",
+                          BookOpen,
+                          "Private Lab Journal & 96-Well ThT Planner",
+                          "Strictly private wet-lab notebook for 96-well ThT assays, master mix recipes, SDS-PAGE gels, and protein purifications.",
+                        ],
+                      ] as const)
+                    : []),
                 ] as const
               ).map(([key, label, Icon, tipTitle, tipDesc]) => {
                 const active = nav === key;
@@ -816,6 +828,7 @@ export default function HomePage() {
               ["feed", "Feed"],
               ["studio", "Lab Studio"],
               ["zotero", "Settings"],
+              ...(user?.username?.toLowerCase() === "y-kuz" ? ([["journal", "Lab Journal"]] as const) : []),
             ] as const
           ).map(([key, label]) => (
             <button
@@ -1770,6 +1783,10 @@ export default function HomePage() {
             onRequireAuth={() => setAuthModalOpen(true)}
             onUserUpdated={(u) => setUser(u)}
           />
+        )}
+
+        {nav === "journal" && user?.username?.toLowerCase() === "y-kuz" && (
+          <LabJournalTab selectedPapers={selectedPapersList} />
         )}
       </main>
 
