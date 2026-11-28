@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Bookmark,
   BookMarked,
+  BookOpen,
   Box,
   Calendar,
   ChevronDown,
